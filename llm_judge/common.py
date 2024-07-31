@@ -127,9 +127,11 @@ class MatchSingle:
             + len(enc.encode(self.judge.prompt_template["prompt_template"]))
         )
         if self.ref_answer:
-            num_input_tokens += len(
-                enc.encode(self.ref_answer["choices"][0]["turns"][0])
-            )
+            if isinstance(self.ref_answer, list):
+                ref_answer_text = self.ref_answer[0]["choices"][0]["turns"][0]
+            else:
+                ref_answer_text = self.ref_answer["choices"][0]["turns"][0]
+            num_input_tokens += len(enc.encode(ref_answer_text))
         num_output_tokens = 200  # Estimated from a few samples
         if self.judge.model in {"gpt-4", "gpt-4-0613"}:
             return (0.03 * num_input_tokens + 0.06 * num_output_tokens) / 1_000
@@ -217,9 +219,11 @@ class MatchPair:
             + len(enc.encode(self.judge.prompt_template["prompt_template"]))
         )
         if self.ref_answer:
-            num_input_tokens += len(
-                enc.encode(self.ref_answer["choices"][0]["turns"][0])
-            )
+            if isinstance(self.ref_answer, list):
+                ref_answer_text = self.ref_answer[0]["choices"][0]["turns"][0]
+            else:
+                ref_answer_text = self.ref_answer["choices"][0]["turns"][0]
+            num_input_tokens += len(enc.encode(ref_answer_text))
         num_output_tokens = 200  # Estimated from a few samples
         if self.judge.model in {"gpt-4", "gpt-4-0613"}:
             return (0.03 * num_input_tokens + 0.06 * num_output_tokens) / 1_000
