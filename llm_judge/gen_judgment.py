@@ -3,7 +3,7 @@ import json
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from itertools import combinations
-from typing import Optional
+from typing import Optional, Dict, List
 
 from common import (
     JUDGEMENT_DIR,
@@ -27,101 +27,141 @@ logger = logging.getLogger(__name__)
 
 
 def make_match_groups_single(
-    questions: list[dict],
-    model_answers: dict[str, dict[int, dict]],
-    ref_answers: dict[str, dict[int, dict]],
+    questions: List[dict],
+    model_answers: Dict[str, Dict[int, List[dict]]],
+    ref_answers: Dict[str, Dict[int, List[dict]]],
     judge_default: Judge,
     judge_math: Judge,
     num_answers_per_question: Optional[int] = None,
 ):
-    """Make match groups for single answer grading.
+    """Make match groups for single answer grading."""
 
-    Args:
-        questions (list): A list of questions.
-        model_answers (dict): A dict of model answers.
-        ref_answers (dict): A dict of reference answers.
-        judge_default (Judge): A judge for default questions.
-        judge_math (Judge): A judge for math questions.
-        num_answers_per_question (Optional[int]): Number of answers to evaluate per question.
-    """
-    match_groups = {}
-    for model in model_answers:
-        matches = []
-        for question in questions:
-            qid = question["question_id"]
-            answer = model_answers[model][qid]
-            if question["category"] in NEED_REF_CATS:
-                judge = judge_math
-                ref_answer = ref_answers[judge.model][qid]
-            else:
-                judge = judge_default
+    match_groups = {model: [] for model in model_answers}
+
+    for question in questions:
+        qid = question["question_id"]
+        category = question["category"]
+
+        # Determine if reference answer is needed
+        if category in NEED_REF_CATS:
+            judge = judge_math
+            ref_answer_list = ref_answers[judge.model].get(qid)
+            if not ref_answer_list:
+                logger.warning(f"No reference answer for question {qid} in model {judge.model}")
                 ref_answer = None
-            matches.append(
-                MatchSingle(
+            else:
+                ref_answer = ref_answer_list[0]
+        else:
+            judge = judge_default
+            ref_answer = None
+        # Get all models that have answers for this question
+        available_models = [model for model, answers in model_answers.items() if qid in answers]
+
+        for model in available_models:
+            answers = model_answers[model][qid]
+            if num_answers_per_question is not None:
+                selected_answers = answers[:num_answers_per_question]
+            else:
+                selected_answers = answers
+
+            for answer in selected_answers:
+                match = MatchSingle(
                     question=question,
                     model=model,
                     answer=answer,
                     judge=judge,
                     ref_answer=ref_answer,
                 )
-            )
-        if num_answers_per_question:
-            matches = matches[:num_answers_per_question]
-        match_groups[f"single:{model}"] = matches
+                match_groups[model].append(match)
+
     return match_groups
 
 
 def make_match_groups_pairwise(
-    questions: list[dict],
-    model_answers: dict[str, dict[int, dict]],
-    ref_answers: dict[str, dict[int, dict]],
+    questions: List[dict],
+    model_answers: Dict[str, Dict[int, List[dict]]],
+    ref_answers: Dict[str, Dict[int, List[dict]]],
     judge_default: Judge,
     judge_math: Judge,
     baseline_model: Optional[str] = None,
     num_answers_per_question: Optional[int] = None,
 ):
-    """Make match groups for pairwise comparison.
+    """Make match groups for pairwise comparison."""
 
-    Args:
-        questions (list): A list of questions.
-        model_answers (dict): A dict of model answers.
-        ref_answers (dict): A dict of reference answers.
-        judge_default (Judge): A judge for default questions.
-        judge_math (Judge): A judge for math questions.
-        baseline_model (Optional[str]): The baseline model.
-        num_answers_per_question (Optional[int]): Number of answers to evaluate per question.
-    """
     match_groups = {}
-    for model_1, model_2 in combinations(model_answers, 2):
-        if baseline_model and baseline_model not in {model_1, model_2}:
-            continue
-        matches = []
-        for question in questions:
-            qid = question["question_id"]
-            answer_1 = model_answers[model_1][qid]
-            answer_2 = model_answers[model_2][qid]
-            if question["category"] in NEED_REF_CATS:
-                judge = judge_math
-                ref_answer = ref_answers[judge.model][qid]
-            else:
-                judge = judge_default
-                ref_answer = None
-            matches.append(
-                MatchPair(
-                    question=question,
-                    model_1=model_1,
-                    model_2=model_2,
-                    answer_1=answer_1,
-                    answer_2=answer_2,
-                    judge=judge,
-                    ref_answer=ref_answer,
-                )
-            )
-        if num_answers_per_question:
-            matches = matches[:num_answers_per_question]
-        match_groups[f"pairwise:{model_1}_{model_2}"] = matches
-    return match_groups
 
+    for question in questions:
+        qid = question["question_id"]
+        category = question["category"]
+
+        # Determine if reference answer is needed
+        if category in NEED_REF_CATS:
+            judge = judge_math
+            ref_answer_list = ref_answers[judge.model].get(qid)
+            if not ref_answer_list:
+                logger.warning(f"No reference answer for question {qid} in model {judge.model}")
+                ref_answer = None
+            else:
+                ref_answer = ref_answer_list[0]
+        else:
+            judge = judge_default
+            ref_answer = None
+
+        # Get all models that have answers for this question
+        available_models = [model for model, answers in model_answers.items() if qid in answers]
+
+        if baseline_model:
+            if baseline_model not in available_models:
+                logger.warning(f"Baseline model {baseline_model} does not have an answer for question {qid}. Skipping.")
+                continue
+            non_baseline_models = [model for model in available_models if model != baseline_model]
+        else:
+            non_baseline_models = available_models
+
+        if num_answers_per_question is not None:
+            selected_non_baseline_models = non_baseline_models[:num_answers_per_question]
+        else:
+            selected_non_baseline_models = non_baseline_models
+
+        if baseline_model:
+            selected_models = selected_non_baseline_models + [baseline_model]
+        else:
+            selected_models = selected_non_baseline_models
+
+        # Generate all unique pairs
+        for model_1, model_2 in combinations(selected_models, 2):
+            if baseline_model and (model_1 != baseline_model and model_2 != baseline_model):
+                # In pairwise-baseline mode, only create pairs with the baseline
+                continue
+
+            pair_key = f"pairwise:{model_1}_{model_2}"
+            if pair_key not in match_groups:
+                match_groups[pair_key] = []
+
+            answers_1 = model_answers[model_1][qid]
+            answers_2 = model_answers[model_2][qid]
+
+            if num_answers_per_question is not None:
+                selected_answers_1 = answers_1[:num_answers_per_question]
+                selected_answers_2 = answers_2[:num_answers_per_question]
+            else:
+                selected_answers_1 = answers_1
+                selected_answers_2 = answers_2
+
+            for ans1 in selected_answers_1:
+                for ans2 in selected_answers_2:
+                    match = MatchPair(
+                        question=question,
+                        model_1=model_1,
+                        model_2=model_2,
+                        answer_1=ans1,
+                        answer_2=ans2,
+                        judge=judge,
+                        ref_answer=ref_answer,
+                    )
+                    match_groups[pair_key].append(match)
+
+    return match_groups
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -140,7 +180,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--judge-model",
         type=str,
-        default="gpt-4-0613",
+        default="gpt-4",
         choices=["gpt-4", "gpt-4-0613", "gpt-4-1106-preview", "gpt-3.5-turbo"],
         help="The judge model.",
     )
@@ -176,7 +216,10 @@ if __name__ == "__main__":
         "--verbose", "-v", action="count", default=0, help="Verbosity level"
     )
     parser.add_argument(
-        "--num_answers_per_question", type=int, default=None, help="Number of answers to evaluate per question."
+        "--num_answers_per_question",
+        type=int,
+        default=None,
+        help="Number of answers to evaluate per question.",
     )
     args = parser.parse_args()
 
@@ -217,14 +260,20 @@ if __name__ == "__main__":
     for model in sorted(models):
         answers = load_model_answers(PREDICTION_DIR / model)
         for question in questions:
-            assert question["question_id"] in answers
+            qid = question["question_id"]
+            if qid not in answers:
+                logger.error(f"Question ID {qid} missing in model {model} answers.")
+                raise ValueError(f"Question ID {qid} missing in model {model} answers.")
         model_answers[model] = answers
 
     logger.info("Load reference answers")
     judge_model = args.judge_model
     answers = load_model_answers(REFERENCE_DIR / "gpt-4")
     for question in filter(lambda x: x["category"] in NEED_REF_CATS, questions):
-        assert question["question_id"] in answers
+        qid = question["question_id"]
+        if qid not in answers:
+            logger.error(f"Reference answer for question ID {qid} missing.")
+            raise ValueError(f"Reference answer for question ID {qid} missing.")
     ref_answers = {judge_model: answers}
 
     logger.info("Load judge prompts")
@@ -257,6 +306,8 @@ if __name__ == "__main__":
             num_answers_per_question=args.num_answers_per_question,
         )
         output_dir = JUDGEMENT_DIR / "pairwise" / args.judge_model
+
+    # Filter out existing match_ids if not overwriting
     target_match_ids = set()
     for match_id in match_groups:
         output_file = output_dir / f"{match_id}.jsonl"
@@ -291,11 +342,15 @@ if __name__ == "__main__":
         with ThreadPoolExecutor(args.parallel) as executor:
             futures = [executor.submit(match.play) for match in matches]
             for future in tqdm(futures):
-                results.append(future.result())
+                try:
+                    result = future.result()
+                    results.append(result)
+                except Exception as e:
+                    logger.error(f"Error processing match {match_id}: {e}")
 
         logger.info(f"Write {len(results)} judgments")
         output_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(output_file, "w") as f:
+        with open(output_file, "w", encoding="utf-8") as f:
             for result in results:
                 f.write(json.dumps(result, ensure_ascii=False) + "\n")
         logger.info(f"Saved the judgments to {output_file}")
@@ -303,4 +358,3 @@ if __name__ == "__main__":
         if args.wandb:
             logger.info("Log to wandb")
             upload_results(args.mode, match_id, results, args.baseline_model)
-

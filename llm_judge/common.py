@@ -127,11 +127,9 @@ class MatchSingle:
             + len(enc.encode(self.judge.prompt_template["prompt_template"]))
         )
         if self.ref_answer:
-            if isinstance(self.ref_answer, list):
-                ref_answer_text = self.ref_answer[0]["choices"][0]["turns"][0]
-            else:
-                ref_answer_text = self.ref_answer["choices"][0]["turns"][0]
-            num_input_tokens += len(enc.encode(ref_answer_text))
+            num_input_tokens += len(
+                enc.encode(self.ref_answer["choices"][0]["turns"][0])
+            )
         num_output_tokens = 200  # Estimated from a few samples
         if self.judge.model in {"gpt-4", "gpt-4-0613"}:
             return (0.03 * num_input_tokens + 0.06 * num_output_tokens) / 1_000
@@ -151,7 +149,6 @@ class MatchSingle:
         if match:
             return ast.literal_eval(match.groups()[0])
         return -1
-
 
 @dataclasses.dataclass
 class MatchPair:
@@ -219,11 +216,9 @@ class MatchPair:
             + len(enc.encode(self.judge.prompt_template["prompt_template"]))
         )
         if self.ref_answer:
-            if isinstance(self.ref_answer, list):
-                ref_answer_text = self.ref_answer[0]["choices"][0]["turns"][0]
-            else:
-                ref_answer_text = self.ref_answer["choices"][0]["turns"][0]
-            num_input_tokens += len(enc.encode(ref_answer_text))
+            num_input_tokens += len(
+                enc.encode(self.ref_answer["choices"][0]["turns"][0])
+            )
         num_output_tokens = 200  # Estimated from a few samples
         if self.judge.model in {"gpt-4", "gpt-4-0613"}:
             return (0.03 * num_input_tokens + 0.06 * num_output_tokens) / 1_000
@@ -263,6 +258,19 @@ def get_model_list(answer_dir: Union[str, Path]):
     return [path.name for path in Path(answer_dir).iterdir()]
 
 
+# def load_model_answers(answer_dir: Union[str, Path]):
+#     """Load model answers.
+
+#     Args:
+#         answer_dir (Union[str, Path]): The answer directory.
+#     """
+#     answers = {}
+#     with open(Path(answer_dir) / "results.jsonl", "r") as fin:
+#         for line in fin:
+#             answer = json.loads(line)
+#             answers[answer["question_id"]] = answer
+#     return answers
+
 def load_model_answers(answer_dir: Union[str, Path]):
     """Load model answers.
 
@@ -273,7 +281,10 @@ def load_model_answers(answer_dir: Union[str, Path]):
     with open(Path(answer_dir) / "results.jsonl", "r") as fin:
         for line in fin:
             answer = json.loads(line)
-            answers[answer["question_id"]] = answer
+            qid = answer["question_id"]
+            if qid not in answers:
+                answers[qid] = []
+            answers[qid].append(answer)
     return answers
 
 
@@ -370,8 +381,3 @@ def filter_pairwise_judgements(
         else:
             filtered_result_id_results_map[result_id] = results
     return filtered_result_id_results_map
-
-
-
-
-

@@ -5,6 +5,9 @@ import os
 import time
 
 import openai
+from openai import OpenAI
+
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 import shortuuid
 from common import PREDICTION_DIR, QUESTION_FILE, load_questions
 from dotenv import load_dotenv
@@ -13,8 +16,8 @@ from tqdm import tqdm
 logger = logging.getLogger(__name__)
 
 load_dotenv()
-openai.api_key = os.getenv("OPENAI_API_KEY")
-openai.organization = os.getenv("OPENAI_ORGANIZATION")
+# TODO: The 'openai.organization' option isn't read in the client API. You will need to pass it when you instantiate the client, e.g. 'OpenAI(organization=os.getenv("OPENAI_ORGANIZATION"))'
+# openai.organization = os.getenv("OPENAI_ORGANIZATION")
 
 
 def generate_response(input_text, generation_config) -> str:
@@ -24,7 +27,7 @@ def generate_response(input_text, generation_config) -> str:
         input_text: The input text.
         generation_config: The config for the generation.
     """
-    response = openai.Completion.create(prompt=input_text, **generation_config)
+    response = client.completions.create(prompt=input_text, **generation_config)
     return response.choices[0].text
 
 
